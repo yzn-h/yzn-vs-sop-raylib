@@ -1,25 +1,32 @@
 use raylib::prelude::*;
 use raylib_sys::TraceLogLevel;
-use std::ffi::CString;
+use std::{cell::OnceCell, ffi::CString};
 
 const SCREEN_WIDTH: i32 = 1200;
 const SCREEN_HEIGHT: i32 = 650;
 const PAINT_RADIUS: f32 = 5.0; // Radius of the paint splat
 
+// global counter
+
 #[derive(Debug)]
-pub struct Player<'a> {
+pub struct Player {
     pub position: Vector2,
     pub velocity: Vector2,
     pub rotation: f32,
     pub speed: f32,
     pub color: Color,
     pub controls: Controls,
-    pub game: &'a MiniGames,
+    pub game: Box<MiniGames>,
     pub is_on_ground: bool,
     pub width: f32,
     pub height: f32,
     pub jump_force: f32,
     pub texture: Texture2D,
+    pub is_jumping: bool,
+    pub jump_time: f32,
+    pub max_jump_time: f32,
+    pub min_jump_velocity: f32,
+    pub points: u32,
 }
 
 #[derive(Debug, Copy, Clone)]
@@ -28,12 +35,13 @@ pub enum Controls {
     ArrowKeys,
 }
 
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, PartialEq, Eq, Clone, Copy)]
 pub enum MiniGames {
     ColorTheMap,
-    Asteroids,
+    Dodge,
     FloorIsLava,
 }
+#[derive(Debug, PartialEq, Eq, Clone, Copy)]
 
 pub enum GameMode {
     MainMenu,
@@ -50,14 +58,14 @@ pub struct Input {
     pub secondary: consts::KeyboardKey,
 }
 
-impl<'a> Player<'a> {
+impl Player {
     pub fn new(
         position: Vector2,
         rotation: f32,
         speed: f32,
         color: Color,
         controls: Controls,
-        game: &'a MiniGames,
+        game: Box<MiniGames>,
         width: f32,
         height: f32,
         jump_force: f32,
@@ -76,6 +84,11 @@ impl<'a> Player<'a> {
             height,
             jump_force,
             texture,
+            is_jumping: false,
+            jump_time: 0.0,
+            max_jump_time: 0.4, // Maximum time the jump can be held (in seconds)
+            min_jump_velocity: 200.0, // Minimum jump velocity when tapping
+            points: 0,
         }
     }
 
@@ -109,10 +122,27 @@ impl<'a> Player<'a> {
         if !self.is_on_ground {
             self.velocity.y += 980.8 * dt;
         }
-        if rl.is_key_down(keys.up) && self.is_on_ground {
-            if *self.game == MiniGames::ColorTheMap {
+
+        // New jump logic
+        if *self.game == MiniGames::ColorTheMap {
+            if rl.is_key_down(keys.up) && self.is_on_ground && !self.is_jumping {
                 self.velocity.y = -self.jump_force;
+                self.is_jumping = true;
+                self.jump_time = 0.0;
                 self.is_on_ground = false;
+            } else if rl.is_key_down(keys.up) && self.is_jumping {
+                self.jump_time += dt;
+                if self.jump_time < self.max_jump_time {
+                    // Continue applying upward force while holding jump
+                    self.velocity.y =
+                        -self.jump_force * (1.0 - (self.jump_time / self.max_jump_time));
+                }
+            } else if self.is_jumping {
+                // Player released jump button or exceeded max jump time
+                self.is_jumping = false;
+                if self.velocity.y < -self.min_jump_velocity {
+                    self.velocity.y = -self.min_jump_velocity;
+                }
             }
         }
 
@@ -124,27 +154,17 @@ impl<'a> Player<'a> {
             horizontal_input -= 1.0;
         }
 
-        match self.game {
+        match *self.game {
             MiniGames::ColorTheMap => {
                 self.velocity.x = horizontal_input * self.speed;
             }
-            MiniGames::Asteroids => {
-                if horizontal_input > 0.0 {
-                    self.velocity.x = 50.0;
-                } else if horizontal_input < 0.0 {
-                    self.velocity.x = -50.0;
-                }
-                if rl.is_key_down(keys.up) {
-                    self.velocity.y -= self.speed * dt * self.rotation.to_radians().cos();
-                    self.velocity.x += self.speed * dt * self.rotation.to_radians().sin();
-                }
-            }
+
             _ => {}
         }
 
         self.position += self.velocity * dt;
     }
-    pub fn handle_collision(&mut self, ops: &'a Vec<EnvItem>) -> Vec<(&Rectangle, Vec<Vector2>)> {
+    pub fn handle_collision(&mut self, ops: &Vec<EnvItem>) -> Vec<(Rectangle, Vec<Vector2>)> {
         let player_rect = self.get_collision_rect();
         let mut collisions = Vec::new();
 
@@ -202,7 +222,7 @@ impl<'a> Player<'a> {
                     points.push(Vector2::new(center_x, center_y));
                 }
 
-                collisions.push((&op.rect, points));
+                collisions.push((op.rect.clone(), points));
             }
         }
 
@@ -264,6 +284,7 @@ fn main() {
     let mut trantition_right_image = Image::load_image("./static/transition_right.png").unwrap();
     trantition_right_image.resize(SCREEN_WIDTH / 2, SCREEN_HEIGHT);
 
+    let mut level_timer = 30.0;
     let trantition_right_texture = rl
         .load_texture_from_image(&thread, &trantition_right_image)
         .unwrap();
@@ -283,8 +304,11 @@ fn main() {
     let mut reversing = false;
     let mut in_game = false;
     let mut delay_timer = 0.0;
+    let mut head_msg: Option<String> = None;
+    let mut level_done = false;
+    let mut level_end_timer = 5.0;
 
-    let game_type = MiniGames::ColorTheMap;
+    let mut game_type = Box::new(MiniGames::ColorTheMap);
     let mut game_mode = GameMode::MainMenu;
 
     let mut camera = Camera2D {
@@ -497,37 +521,39 @@ fn main() {
         },
     ];
 
-    let mut player1 = Player::new(
-        Vector2::new(100.0, 100.0),
-        0.0,
-        200.0,
-        Color::RED,
-        Controls::WASD,
-        &game_type,
-        50.0,
-        50.0,
-        500.0,
-        player1_texture,
-    );
-
-    let mut player2 = Player::new(
-        Vector2::new(200.0, 100.0),
-        0.0,
-        200.0,
-        Color::GREEN,
-        Controls::ArrowKeys,
-        &game_type,
-        50.0,
-        50.0,
-        500.0,
-        player2_texture,
-    );
+    let mut players = [
+        Player::new(
+            Vector2::new(100.0, 100.0),
+            0.0,
+            200.0,
+            Color::RED,
+            Controls::WASD,
+            game_type.clone(),
+            50.0,
+            50.0,
+            700.0,
+            player1_texture,
+        ),
+        Player::new(
+            Vector2::new(200.0, 100.0),
+            0.0,
+            200.0,
+            Color::GREEN,
+            Controls::ArrowKeys,
+            game_type.clone(),
+            50.0,
+            50.0,
+            700.0,
+            player2_texture,
+        ),
+    ];
 
     let mut map_image =
         Image::gen_image_color(SCREEN_WIDTH, SCREEN_HEIGHT, Color::WHITE.alpha(0.0));
     let mut map_texture = rl.load_texture_from_image(&thread, &map_image).unwrap();
 
     rl.set_target_fps(60);
+    let mut persents: [f32; 4] = [0.0; 4];
 
     while !rl.window_should_close() {
         let dt = rl.get_frame_time();
@@ -555,39 +581,28 @@ fn main() {
                 }
             }
         }
+        for player in &mut players {
+            if !level_done {
+                player.update(&rl, dt);
+                let collisions = player.handle_collision(&ops);
+                let is_colliding = !collisions.is_empty();
 
-        player1.update(&rl, dt);
-        player2.update(&rl, dt);
-
-        let collisions = player1.handle_collision(&ops);
-        let is_colliding = !collisions.is_empty();
-        let points: Vec<Vector2> = collisions
-            .into_iter()
-            .flat_map(|(_, collision_points)| collision_points)
-            .collect();
-        for point in points {
-            player1.paint(&mut map_image, point);
-        }
-        if !is_colliding {
-            player1.is_on_ground = false;
+                let points: Vec<Vector2> = collisions
+                    .into_iter()
+                    .flat_map(|(_, collision_points)| collision_points)
+                    .collect();
+                for point in points {
+                    player.paint(&mut map_image, point);
+                }
+                if !is_colliding {
+                    player.is_on_ground = false;
+                }
+            }
         }
 
-        let collisions = player2.handle_collision(&ops);
-        let is_colliding = !collisions.is_empty();
-        let points: Vec<Vector2> = collisions
-            .into_iter()
-            .flat_map(|(_, collision_points)| collision_points)
-            .collect();
-        for point in points {
-            player2.paint(&mut map_image, point);
-        }
-        if !is_colliding {
-            player2.is_on_ground = false;
-        }
         let width = map_image.width;
         let height = map_image.height;
         let format = map_image.format();
-
         let data = unsafe {
             std::slice::from_raw_parts(
                 map_image.data as *const u8,
@@ -596,33 +611,95 @@ fn main() {
                     .unwrap(),
             )
         };
+        // let mut reset_game = move || {
+        // };
+
         map_texture.update_texture(data);
+        if (game_mode == GameMode::Game && !level_done) {
+            level_timer -= dt;
+        }
+        if (level_done) {
+            level_end_timer -= dt;
+        }
+        if (level_end_timer <= 0.0) {
+            level_done = false;
+            level_end_timer = 5.0;
+            level_timer = 30.0;
+            head_msg = None;
+            game_type = Box::new(MiniGames::Dodge);
+        }
+
+        if (level_timer <= 0.0) {
+            // level += 1;
+            persents = calculate_winner(
+                &mut map_image,
+                2,
+                &players[0].color,
+                &players[1].color,
+                &Color::ALICEBLUE,
+                &Color::WHEAT,
+            );
+            // get index of largest value
+            let mut index = 0;
+            for i in 0..persents.len() {
+                if persents[i] > persents[index] {
+                    index = i;
+                }
+            }
+            println!("{:?}", index);
+
+            match index {
+                0 => players[0].points += 1,
+                1 => players[1].points += 1,
+                // 2 => players[2].points += 1,
+                // 3 => players[3].points += 1,
+                _ => {}
+            }
+            head_msg = Some(format!("player {} won", index + 1));
+
+            for player in &mut players {
+                if player.points >= 5 {
+                    // player.points += 1;
+                }
+                // player.reset();
+            }
+            level_done = true;
+            // level_timer = 5.0;
+            // spown a corotene and after 5 seconds change the game type
+            use std::thread;
+            use std::time::Duration;
+
+            // thread::spawn(move || {
+
+            //     game_type = MiniGames::Dodge;
+            // });
+        }
 
         // --- Drawing ---
         let mut d = rl.begin_drawing(&thread);
         d.clear_background(Color::from_hex("C7DCD0").unwrap());
 
         // Add mouse position logging
-        if d.is_mouse_button_pressed(MouseButton::MOUSE_BUTTON_LEFT) {
-            let mouse_pos = d.get_mouse_position();
-            println!("Mouse clicked at: x={}, y={}", mouse_pos.x, mouse_pos.y);
-        }
+        // if d.is_mouse_button_pressed(MouseButton::MOUSE_BUTTON_LEFT) {
+        //     let mouse_pos = d.get_mouse_position();
+        //     println!("Mouse clicked at: x={}, y={}", mouse_pos.x, mouse_pos.y);
+        // }
 
-        if (d.is_key_pressed(consts::KeyboardKey::KEY_ENTER)) {
-            match calculate_winner(&mut map_image, player1.color, player2.color) {
-                Some(1) => {
-                    player1.color = Color::GOLD;
-                }
-                Some(2) => {
-                    player2.color = Color::GOLD;
-                }
-                None => {
-                    player1.color = Color::PINK;
-                    player2.color = Color::PINK;
-                }
-                _ => {}
-            }
-        }
+        // if (d.is_key_pressed(consts::KeyboardKey::KEY_ENTER)) {
+        //     match calculate_winner(&mut map_image, &players[0].color, &players[1].color) {
+        //         Some(1) => {
+        //             players[0].color = Color::GOLD;
+        //         }
+        //         Some(2) => {
+        //             players[1].color = Color::GOLD;
+        //         }
+        //         None => {
+        //             // player1.color = Color::PINK;
+        //             // player2.color = Color::PINK;
+        //         }
+        //         _ => {}
+        //     }
+        // }
 
         {
             camera.offset = Vector2::new(
@@ -634,10 +711,12 @@ fn main() {
             match game_mode {
                 GameMode::Game => {
                     d.draw_texture(&level_texture, 0, 0, Color::WHITE);
-
-                    d.draw_texture(&map_texture, 0, 0, Color::WHITE);
-                    player1.draw(&mut d);
-                    player2.draw(&mut d);
+                    if (game_type == Box::new(MiniGames::ColorTheMap)) {
+                        d.draw_texture(&map_texture, 0, 0, Color::WHITE);
+                    }
+                    for player in players.iter() {
+                        player.draw(&mut d);
+                    }
 
                     // for op in ops.iter() {
                     //     d.draw_rectangle_rec(op.rect, op.color);
@@ -654,6 +733,47 @@ fn main() {
                     d.draw_texture(&trantition_left_texture, left_x as i32, 0, Color::WHITE);
 
                     d.draw_texture(&trantition_right_texture, right_x as i32, 0, Color::WHITE);
+                    d.draw_text(
+                        &(level_timer as i32).to_string(),
+                        SCREEN_WIDTH / 2,
+                        20,
+                        35,
+                        Color::BLACK,
+                    );
+                    if let Some(msg) = &head_msg {
+                        d.draw_text(
+                            &msg,
+                            SCREEN_WIDTH / 2 - d.measure_text(msg, 35) / 2,
+                            SCREEN_HEIGHT / 2 - 35,
+                            35,
+                            Color::BLACK,
+                        );
+                        // display the persents orders from highest to lowest with the coller of it
+                        //
+                        let mut orderd = persents.clone();
+                        orderd.sort_by(|a, b| b.partial_cmp(a).unwrap());
+                        for (i, order) in orderd.iter().enumerate() {
+                            let og_index: Option<usize> = persents
+                                .iter()
+                                .position(|x| *x != 0. && x == order)
+                                .or_else(|| None);
+                            println!("{:?}", og_index);
+                            if let Some(index) = og_index {
+                                d.draw_text(
+                                    &format!("{}: {:.1}%", i + 1, order * 100.0),
+                                    SCREEN_WIDTH / 2
+                                        - d.measure_text(
+                                            &format!("{}: {:.1}%", i + 1, order * 100.0),
+                                            20,
+                                        ) / 2,
+                                    SCREEN_HEIGHT / 2 + 50 + i as i32 * 20,
+                                    20,
+                                    // get index and get color of players
+                                    players[index].color,
+                                );
+                            }
+                        }
+                    }
                 }
                 GameMode::WinScreen => {
                     let bounds = Rectangle::new(
@@ -701,9 +821,18 @@ fn main() {
     }
 }
 
-fn calculate_winner(image: &mut Image, player1_color: Color, player2_color: Color) -> Option<i32> {
+fn calculate_winner(
+    image: &mut Image,
+    players_count: usize,
+    player1_color: &Color,
+    player2_color: &Color,
+    player3_color: &Color,
+    player4_color: &Color,
+) -> [f32; 4] {
     let mut player1_count = 0;
     let mut player2_count = 0;
+    let mut player3_count = 0;
+    let mut player4_count = 0;
 
     for y in 0..image.height() {
         for x in 0..image.width() {
@@ -718,15 +847,29 @@ fn calculate_winner(image: &mut Image, player1_color: Color, player2_color: Colo
                 && pixel_color.b == player2_color.b
             {
                 player2_count += 1;
+            } else if players_count >= 3
+                || pixel_color.r == player3_color.r
+                    && pixel_color.g == player3_color.g
+                    && pixel_color.b == player3_color.b
+            {
+                player3_count += 1;
+            } else if players_count >= 4
+                || pixel_color.r == player4_color.r
+                    && pixel_color.g == player4_color.g
+                    && pixel_color.b == player4_color.b
+            {
+                player4_count += 1;
             }
         }
     }
-
-    if player1_count > player2_count {
-        Some(1)
-    } else if player2_count > player1_count {
-        Some(2)
-    } else {
-        None
-    }
+    [
+        player1_count as f32
+            / (player1_count + player2_count + player3_count + player4_count) as f32,
+        player2_count as f32
+            / (player1_count + player2_count + player3_count + player4_count) as f32,
+        player3_count as f32
+            / (player1_count + player2_count + player3_count + player4_count) as f32,
+        player4_count as f32
+            / (player1_count + player2_count + player3_count + player4_count) as f32,
+    ]
 }
