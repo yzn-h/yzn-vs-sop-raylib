@@ -6,7 +6,7 @@ const SCREEN_WIDTH: i32 = 1200;
 const SCREEN_HEIGHT: i32 = 650;
 const PAINT_RADIUS: f32 = 5.0; // Radius of the paint splat
 
-#[derive(Debug, Copy, Clone)]
+#[derive(Debug)]
 pub struct Player<'a> {
     pub position: Vector2,
     pub velocity: Vector2,
@@ -19,6 +19,7 @@ pub struct Player<'a> {
     pub width: f32,
     pub height: f32,
     pub jump_force: f32,
+    pub texture: Texture2D,
 }
 
 #[derive(Debug, Copy, Clone)]
@@ -60,6 +61,7 @@ impl<'a> Player<'a> {
         width: f32,
         height: f32,
         jump_force: f32,
+        texture: Texture2D,
     ) -> Self {
         Player {
             position,
@@ -73,6 +75,7 @@ impl<'a> Player<'a> {
             width,
             height,
             jump_force,
+            texture,
         }
     }
 
@@ -216,16 +219,26 @@ impl<'a> Player<'a> {
     }
 
     pub fn draw(&self, d: &mut RaylibMode2D<'_, RaylibDrawHandle>) {
-        d.draw_rectangle_pro(
-            Rectangle {
-                x: self.position.x,
-                y: self.position.y,
-                width: self.width,
-                height: self.height,
-            },
-            Vector2::new(self.width / 2.0, self.height / 2.0),
+        // d.draw_rectangle_pro(
+        //     Rectangle {
+        //         x: self.position.x,
+        //         y: self.position.y,
+        //         width: self.width,
+        //         height: self.height,
+        //     },
+        //     Vector2::new(self.width / 2.0, self.height / 2.0),
+        //     self.rotation,
+        //     self.color,
+        // );
+        d.draw_texture_ex(
+            &self.texture,
+            Vector2::new(
+                self.position.x - self.width / 2.,
+                self.position.y - self.height / 2.,
+            ),
             self.rotation,
-            self.color,
+            0.32,
+            Color::WHITE,
         );
     }
     // Modified paint function
@@ -259,6 +272,8 @@ fn main() {
     let trantition_left_texture = rl
         .load_texture_from_image(&thread, &trantition_left_image)
         .unwrap();
+    let mut player1_texture = rl.load_texture(&thread, "./static/player1.png").unwrap();
+    let mut player2_texture = rl.load_texture(&thread, "./static/player2.png").unwrap();
 
     let mut level_image = Image::load_image("./static/level.png").unwrap();
     level_image.resize(SCREEN_WIDTH, SCREEN_HEIGHT);
@@ -492,6 +507,7 @@ fn main() {
         50.0,
         50.0,
         500.0,
+        player1_texture,
     );
 
     let mut player2 = Player::new(
@@ -504,6 +520,7 @@ fn main() {
         50.0,
         50.0,
         500.0,
+        player2_texture,
     );
 
     let mut map_image =
