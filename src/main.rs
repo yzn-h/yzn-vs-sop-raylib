@@ -15,7 +15,7 @@ pub struct Player {
     pub rotation: f32,
     pub speed: f32,
     pub color: Color,
-    pub controls: Controls,
+    pub controls: InputType,
     pub game: Box<MiniGames>,
     pub is_on_ground: bool,
     pub width: f32,
@@ -28,13 +28,30 @@ pub struct Player {
     pub min_jump_velocity: f32,
     pub points: u32,
     pub number: u32,
+    pub dead: bool,
 }
 
 #[derive(Debug, Copy, Clone)]
-pub enum Controls {
+pub enum KeyboardControls {
     WASD,
     ArrowKeys,
-    // Controller(usize),
+}
+
+#[derive(Debug, Clone, Copy)]
+pub enum InputType {
+    Keyboard(KeyboardControls),
+    Controller(usize),
+}
+#[derive(Debug, Clone, Copy)]
+
+pub struct ControllerControls {
+    pub number: u32,
+    pub up: consts::GamepadButton,
+    pub down: consts::GamepadButton,
+    pub left: consts::GamepadButton,
+    pub right: consts::GamepadButton,
+    pub primary: consts::GamepadButton,
+    pub secondary: consts::GamepadButton,
 }
 
 #[derive(Debug, PartialEq, Eq, Clone, Copy)]
@@ -51,7 +68,7 @@ pub enum GameMode {
     WinScreen,
 }
 
-pub struct Input {
+pub struct KeyboardInput {
     pub up: consts::KeyboardKey,
     pub down: consts::KeyboardKey,
     pub left: consts::KeyboardKey,
@@ -60,13 +77,27 @@ pub struct Input {
     pub secondary: consts::KeyboardKey,
 }
 
+pub struct GamepadInput {
+    pub up: consts::GamepadButton,
+    pub down: consts::GamepadButton,
+    pub left: consts::GamepadButton,
+    pub right: consts::GamepadButton,
+    pub primary: consts::GamepadButton,
+    pub secondary: consts::GamepadButton,
+}
+
+pub enum ControlsType {
+    Keyboard(KeyboardInput),
+    Gamepad(GamepadInput),
+}
+
 impl Player {
     pub fn new(
         position: Vector2,
         rotation: f32,
         speed: f32,
         color: Color,
-        controls: Controls,
+        controls: InputType,
         game: Box<MiniGames>,
         width: f32,
         height: f32,
@@ -93,42 +124,77 @@ impl Player {
             min_jump_velocity: 200.0, // Minimum jump velocity when tapping
             points: 0,
             number,
+            dead: false,
         }
     }
 
     pub fn update(&mut self, rl: &RaylibHandle, dt: f32) {
-        let keys: Input;
-
+        let keys: ControlsType;
+        if (self.dead) {
+            return;
+        }
         match self.controls {
-            Controls::WASD => {
-                keys = Input {
-                    up: consts::KeyboardKey::KEY_W,
-                    down: consts::KeyboardKey::KEY_S,
-                    left: consts::KeyboardKey::KEY_A,
-                    right: consts::KeyboardKey::KEY_D,
-                    primary: consts::KeyboardKey::KEY_F,
-                    secondary: consts::KeyboardKey::KEY_G,
-                };
-            }
+            InputType::Keyboard(input) => match input {
+                KeyboardControls::WASD => {
+                    keys = ControlsType::Keyboard(KeyboardInput {
+                        up: consts::KeyboardKey::KEY_W,
+                        down: consts::KeyboardKey::KEY_S,
+                        left: consts::KeyboardKey::KEY_A,
+                        right: consts::KeyboardKey::KEY_D,
+                        primary: consts::KeyboardKey::KEY_F,
+                        secondary: consts::KeyboardKey::KEY_G,
+                    });
+                }
+                KeyboardControls::ArrowKeys => {
+                    keys = ControlsType::Keyboard(KeyboardInput {
+                        up: consts::KeyboardKey::KEY_UP,
+                        down: consts::KeyboardKey::KEY_DOWN,
+                        left: consts::KeyboardKey::KEY_LEFT,
+                        right: consts::KeyboardKey::KEY_RIGHT,
+                        primary: consts::KeyboardKey::KEY_H,
+                        secondary: consts::KeyboardKey::KEY_J,
+                    });
+                }
+            },
+            InputType::Controller(number) => {
+                keys = ControlsType::Gamepad(GamepadInput {
+                    up: consts::GamepadButton::GAMEPAD_BUTTON_LEFT_FACE_UP,
+                    down: consts::GamepadButton::GAMEPAD_BUTTON_LEFT_FACE_DOWN,
+                    left: consts::GamepadButton::GAMEPAD_BUTTON_LEFT_FACE_LEFT,
+                    right: consts::GamepadButton::GAMEPAD_BUTTON_LEFT_FACE_RIGHT,
+                    primary: consts::GamepadButton::GAMEPAD_BUTTON_LEFT_FACE_RIGHT,
+                    secondary: consts::GamepadButton::GAMEPAD_BUTTON_LEFT_FACE_LEFT,
+                });
+            } // Controls::WASD => {
+              //     keys = Input {
+              //         up: consts::KeyboardKey::KEY_W,
+              //         down: consts::KeyboardKey::KEY_S,
+              //         left: consts::KeyboardKey::KEY_A,
+              //         right: consts::KeyboardKey::KEY_D,
+              //         primary: consts::KeyboardKey::KEY_F,
+              //         secondary: consts::KeyboardKey::KEY_G,
+              //     };
+              // }
 
-            Controls::ArrowKeys => {
-                keys = Input {
-                    up: consts::KeyboardKey::KEY_UP,
-                    down: consts::KeyboardKey::KEY_DOWN,
-                    left: consts::KeyboardKey::KEY_LEFT,
-                    right: consts::KeyboardKey::KEY_RIGHT,
-                    primary: consts::KeyboardKey::KEY_J,
-                    secondary: consts::KeyboardKey::KEY_K,
-                };
-            } // Controls::Controller(index) => {
-              // keys = Input {
-              //     up: consts::GamepadButton:: as usize,
-              //     down: consts::GamepadButton::DOWN as usize,
-              //     left: consts::GamepadButton::LEFT as usize,
-              //     right: consts::GamepadButton::RIGHT as usize,
-              //     primary: consts::GamepadButton::A as usize,
-              //     secondary: consts::GamepadButton::B as usize,
-              // };
+              // Controls::ArrowKeys => {
+              //     keys = Input {
+              //         up: consts::KeyboardKey::KEY_UP,
+              //         down: consts::KeyboardKey::KEY_DOWN,
+              //         left: consts::KeyboardKey::KEY_LEFT,
+              //         right: consts::KeyboardKey::KEY_RIGHT,
+              //         primary: consts::KeyboardKey::KEY_J,
+              //         secondary: consts::KeyboardKey::KEY_K,
+              //     };
+              // }
+              // Controls::Controller(index) => {
+              //     keys = Input {
+              //         up: consts::GamepadButton::GAMEPAD_BUTTON_LEFT_FACE_UP,
+              //         down: consts::GamepadButton::GAMEPAD_BUTTON_LEFT_FACE_DOWN,
+              //         left: consts::GamepadButton::GAMEPAD_BUTTON_LEFT_FACE_LEFT,
+              //         right: consts::GamepadButton::GAMEPAD_BUTTON_LEFT_FACE_RIGHT,
+              //         primary: consts::GamepadButton::A as usize,
+              //         secondary: consts::GamepadButton::B as usize,
+              //     };
               // }
         }
         // consts::GamepadButton::UP
@@ -137,33 +203,79 @@ impl Player {
             self.velocity.y += 980.8 * dt;
         }
         // New jump logic
-        if *self.game == MiniGames::ColorTheMap {
-            if rl.is_key_down(keys.up) && self.is_on_ground && !self.is_jumping {
-                self.velocity.y = -self.jump_force;
-                self.is_jumping = true;
-                self.jump_time = 0.0;
-                self.is_on_ground = false;
-            } else if rl.is_key_down(keys.up) && self.is_jumping {
-                self.jump_time += dt;
-                if self.jump_time < self.max_jump_time {
-                    // Continue applying upward force while holding jump
-                    self.velocity.y =
-                        -self.jump_force * (1.0 - (self.jump_time / self.max_jump_time));
+        let mut up = false;
+        let mut down = false;
+        let mut left = false;
+        let mut right = false;
+        let mut primary = false;
+        let mut secondary = false;
+
+        match keys {
+            ControlsType::Gamepad(keys) => {
+                if rl.is_gamepad_button_down(self.number as i32 - 2, keys.up) {
+                    up = true;
                 }
-            } else if self.is_jumping {
-                // Player released jump button or exceeded max jump time
-                self.is_jumping = false;
-                if self.velocity.y < -self.min_jump_velocity {
-                    self.velocity.y = -self.min_jump_velocity;
+                if rl.is_gamepad_button_down(self.number as i32 - 2, keys.down) {
+                    down = true;
                 }
+                if rl.is_gamepad_button_down(self.number as i32 - 2, keys.left) {
+                    left = true;
+                }
+                if rl.is_gamepad_button_down(self.number as i32 - 2, keys.right) {
+                    right = true;
+                }
+                if rl.is_gamepad_button_down(self.number as i32 - 2, keys.primary) {
+                    primary = true;
+                }
+                if rl.is_gamepad_button_down(self.number as i32 - 2, keys.secondary) {
+                    secondary = true;
+                }
+            }
+            ControlsType::Keyboard(keys) => {
+                if rl.is_key_down(keys.up) {
+                    up = true;
+                }
+                if rl.is_key_down(keys.down) {
+                    down = true;
+                }
+                if rl.is_key_down(keys.left) {
+                    left = true;
+                }
+                if rl.is_key_down(keys.right) {
+                    right = true;
+                }
+                if rl.is_key_down(keys.primary) {
+                    primary = true;
+                }
+                if rl.is_key_down(keys.secondary) {
+                    secondary = true;
+                }
+            }
+        }
+        if up && self.is_on_ground && !self.is_jumping {
+            self.velocity.y = -self.jump_force;
+            self.is_jumping = true;
+            self.jump_time = 0.0;
+            self.is_on_ground = false;
+        } else if up && self.is_jumping {
+            self.jump_time += dt;
+            if self.jump_time < self.max_jump_time {
+                // Continue applying upward force while holding jump
+                self.velocity.y = -self.jump_force * (1.0 - (self.jump_time / self.max_jump_time));
+            }
+        } else if self.is_jumping {
+            // Player released jump button or exceeded max jump time
+            self.is_jumping = false;
+            if self.velocity.y < -self.min_jump_velocity {
+                self.velocity.y = -self.min_jump_velocity;
             }
         }
 
         let mut horizontal_input = 0.0;
-        if rl.is_key_down(keys.right) {
+        if right {
             horizontal_input += 1.0;
         }
-        if rl.is_key_down(keys.left) {
+        if left {
             horizontal_input -= 1.0;
         }
 
@@ -295,7 +407,7 @@ impl Player {
         //     self.rotation,
         //     self.color,
         // );
-
+        let tint = if self.dead { Color::GRAY } else { Color::WHITE };
         d.draw_texture_ex(
             &self.texture.as_ref(),
             Vector2::new(
@@ -304,7 +416,7 @@ impl Player {
             ),
             self.rotation,
             0.65,
-            Color::WHITE,
+            tint,
         );
     }
     // Modified paint function
@@ -337,7 +449,7 @@ fn main() {
     let mut trantition_right_image = Image::load_image("./static/transition_right.png").unwrap();
     trantition_right_image.resize(SCREEN_WIDTH / 2, SCREEN_HEIGHT);
 
-    let mut level_timer = 30.0;
+    let mut level_timer = 5.0;
     let trantition_right_texture = rl
         .load_texture_from_image(&thread, &trantition_right_image)
         .unwrap();
@@ -583,9 +695,9 @@ fn main() {
         Player::new(
             Vector2::new(100.0, 100.0),
             0.0,
-            200.0,
+            300.0,
             Color::from_hex("FBB954").unwrap(),
-            Controls::WASD,
+            InputType::Keyboard(KeyboardControls::WASD),
             game_type.clone(),
             50.0,
             50.0,
@@ -596,9 +708,9 @@ fn main() {
         Player::new(
             Vector2::new(200.0, 100.0),
             0.0,
-            200.0,
+            300.0,
             Color::from_hex("A884F3").unwrap(),
-            Controls::ArrowKeys,
+            InputType::Keyboard(KeyboardControls::ArrowKeys),
             game_type.clone(),
             50.0,
             50.0,
@@ -609,9 +721,9 @@ fn main() {
         Player::new(
             Vector2::new(300.0, 100.0),
             0.0,
-            200.0,
+            300.0,
             Color::from_hex("1EBC73").unwrap(),
-            Controls::ArrowKeys,
+            InputType::Controller(2),
             game_type.clone(),
             50.0,
             50.0,
@@ -622,9 +734,9 @@ fn main() {
         Player::new(
             Vector2::new(400.0, 100.0),
             0.0,
-            200.0,
+            300.0,
             Color::from_hex("E83B3B").unwrap(),
-            Controls::ArrowKeys,
+            InputType::Controller(3),
             game_type.clone(),
             50.0,
             50.0,
@@ -643,10 +755,7 @@ fn main() {
 
     while !rl.window_should_close() {
         let dt = rl.get_frame_time();
-        println!(
-            "{:?}",
-            rl.get_gamepad_axis_movement(0, consts::GamepadAxis::GAMEPAD_AXIS_LEFT_X)
-        );
+
         //  rl.is_gamepad_button_down(0, consts::GamepadButton::GAMEPAD_BUTTON_LEFT_FACE_UP)
         // println!("{}", );
         // Update transition
@@ -681,36 +790,46 @@ fn main() {
             if bullet.time_to_live <= 0.0 {
                 delete_bullets.push(index);
             }
+            for player in &mut players[0..players_count] {
+                if let Some(collision_rect) =
+                    player.get_collision_rect().get_collision_rec(&bullet.rect)
+                {
+                    // player.health -= 1;
+                    // delete_bullets.push(index);
+                    player.dead = true;
+                }
+            }
         }
         for index in delete_bullets {
             bullets.remove(index);
         }
         let players_clone = players.clone();
-        for player in &mut players[0..players_count] {
-            let players_clone: Vec<&Player> = players_clone
-                .iter()
-                .map(|p| p)
-                .filter(|p| p.number != player.number)
-                .collect();
-
-            if !level_done {
-                player.update(&rl, dt);
-                let collisions = player.handle_collision(&ops, players_clone);
-                let is_colliding = !collisions.is_empty();
-
-                let points: Vec<Vector2> = collisions
-                    .into_iter()
-                    .flat_map(|(_, collision_points)| collision_points)
+        if (game_mode == GameMode::Game) {
+            for player in &mut players[0..players_count] {
+                let players_clone: Vec<&Player> = players_clone
+                    .iter()
+                    .map(|p| p)
+                    .filter(|p| p.number != player.number)
                     .collect();
-                for point in points {
-                    player.paint(&mut map_image, point);
-                }
-                if !is_colliding {
-                    player.is_on_ground = false;
+
+                if !level_done {
+                    player.update(&rl, dt);
+                    let collisions = player.handle_collision(&ops, players_clone);
+                    let is_colliding = !collisions.is_empty();
+
+                    let points: Vec<Vector2> = collisions
+                        .into_iter()
+                        .flat_map(|(_, collision_points)| collision_points)
+                        .collect();
+                    for point in points {
+                        player.paint(&mut map_image, point);
+                    }
+                    if !is_colliding {
+                        player.is_on_ground = false;
+                    }
                 }
             }
         }
-
         let width = map_image.width;
         let height = map_image.height;
         let format = map_image.format();
@@ -733,61 +852,144 @@ fn main() {
             level_end_timer -= dt;
         }
         if (level_end_timer <= 0.0) {
-            level_done = false;
             level_end_timer = 5.0;
-            level_timer = 30.0;
+            level_timer = 15.0;
             head_msg = None;
-            game_type = Box::new(MiniGames::Dodge);
+            match *game_type {
+                MiniGames::ColorTheMap => {
+                    game_type = Box::new(MiniGames::Dodge);
+                }
+                MiniGames::Dodge => {
+                    game_type = Box::new(MiniGames::ColorTheMap);
+                }
+                _ => {}
+            }
+
+            for player in &mut players {
+                player.dead = false;
+                player.position = Vector2::new(100.0 + 100.0 * player.number as f32, 100.0);
+            }
+            level_done = false;
         }
 
-        if (*game_type == MiniGames::Dodge && spawn_timer <= 0.0) {
+        if (*game_type == MiniGames::Dodge && spawn_timer <= 0.0 && level_done == false) {
             bullets.push(Bullet {
-                rect: Rectangle::new(200., 200., 15., 30.),
+                rect: Rectangle::new(-20., 50., 15., 30.),
                 color: Color::PINK,
-                speed: Vector2::new(100.0, 0.0),
+                speed: Vector2::new(250.0, 0.0),
                 time_to_live: 10.,
             });
+            bullets.push(Bullet {
+                rect: Rectangle::new(-20., 200., 15., 30.),
+                color: Color::PINK,
+                speed: Vector2::new(250.0, 0.0),
+                time_to_live: 10.,
+            });
+            bullets.push(Bullet {
+                rect: Rectangle::new(-20., 350., 15., 30.),
+                color: Color::PINK,
+                speed: Vector2::new(250.0, 0.0),
+                time_to_live: 10.,
+            });
+            bullets.push(Bullet {
+                rect: Rectangle::new(-20., 500., 15., 30.),
+                color: Color::PINK,
+                speed: Vector2::new(250.0, 0.0),
+                time_to_live: 10.,
+            });
+            bullets.push(Bullet {
+                rect: Rectangle::new(-20., 650., 15., 30.),
+                color: Color::PINK,
+                speed: Vector2::new(250.0, 0.0),
+                time_to_live: 10.,
+            });
+            bullets.push(Bullet {
+                rect: Rectangle::new(-20., 800., 15., 30.),
+                color: Color::PINK,
+                speed: Vector2::new(250.0, 0.0),
+                time_to_live: 10.,
+            });
+
             spawn_timer = 5.0;
         }
 
         if (*game_type == MiniGames::Dodge) {
             spawn_timer -= dt;
         }
-
-        if (level_timer <= 0.0) {
-            // level += 1;
-            persents = calculate_winner(
-                &mut map_image,
-                2,
-                &players[0].color,
-                &players[1].color,
-                &players[2].color,
-                &players[3].color,
-            );
-            // get index of largest value
-            let mut index = 0;
-            for i in 0..persents.len() {
-                if persents[i] > persents[index] {
-                    index = i;
-                }
+        if (*game_type == MiniGames::Dodge && level_done == false) {
+            let mut players_alive: Vec<&mut Player> = players
+                .iter_mut()
+                .filter(|p| p.dead == false && p.number < players_count as u32)
+                .collect();
+            if players_alive.len() == 1 {
+                head_msg = Some(format!("Player {} won", players_alive[0].number + 1));
+                level_done = true;
+                level_end_timer = 5.0;
             }
+        }
+        if (level_timer <= 0.0 && level_done == false) {
+            // level += 1;
+            match *game_type {
+                MiniGames::ColorTheMap => {
+                    persents = calculate_winner(
+                        &mut map_image,
+                        2,
+                        &players[0].color,
+                        &players[1].color,
+                        &players[2].color,
+                        &players[3].color,
+                    );
+                    // get index of largest value
+                    let mut index = 0;
+                    for i in 0..persents.len() {
+                        if persents[i] > persents[index] {
+                            index = i;
+                        }
+                    }
 
-            match index {
-                0 => players[0].points += 1,
-                1 => players[1].points += 1,
-                2 => players[2].points += 1,
-                3 => players[3].points += 1,
+                    match index {
+                        0 => players[0].points += 1,
+                        1 => players[1].points += 1,
+                        2 => players[2].points += 1,
+                        3 => players[3].points += 1,
+                        _ => {}
+                    }
+                    head_msg = Some(format!("player {} won", index + 1));
+
+                    for player in &mut players[0..players_count] {
+                        if player.points >= 5 {
+                            // player.points += 1;
+                            game_mode = GameMode::WinScreen;
+                        }
+                        // player.reset();
+                    }
+                }
+                MiniGames::Dodge => {
+                    let mut players_alive: Vec<&mut Player> = players
+                        .iter_mut()
+                        .filter(|p| p.dead == false && p.number < players_count as u32)
+                        .collect();
+                    if players_alive.len() == 1 {
+                        head_msg = Some(format!("Player {} won", players_alive[0].number + 1));
+                    } else {
+                        head_msg = Some(format!("it's a tie"));
+                    }
+
+                    for player in &mut players_alive {
+                        player.points += 1;
+                    }
+                    // for player in &mut players[0..players_count] {
+                    //     if player.points >= 5 {
+                    //         // player.points += 1;
+                    //     }
+                    //     // player.reset();
+                    // }
+                }
                 _ => {}
             }
-            head_msg = Some(format!("player {} won", index + 1));
 
-            for player in &mut players[0..players_count] {
-                if player.points >= 5 {
-                    // player.points += 1;
-                }
-                // player.reset();
-            }
             level_done = true;
+            level_end_timer = 5.0;
             // level_timer = 5.0;
             // spown a corotene and after 5 seconds change the game type
             use std::thread;
@@ -798,7 +1000,7 @@ fn main() {
             //     game_type = MiniGames::Dodge;
             // });
         }
-
+        println!("{:?}", level_done);
         // --- Drawing ---
         let mut d = rl.begin_drawing(&thread);
         d.clear_background(Color::from_hex("C7DCD0").unwrap());
@@ -879,26 +1081,28 @@ fn main() {
                         );
                         // display the persents orders from highest to lowest with the coller of it
                         //
-                        let mut orderd = persents.clone();
-                        orderd.sort_by(|a, b| b.partial_cmp(a).unwrap());
-                        for (i, order) in orderd.iter().enumerate() {
-                            let og_index: Option<usize> = persents
-                                .iter()
-                                .position(|x| *x != 0. && x == order)
-                                .or_else(|| None);
-                            if let Some(index) = og_index {
-                                d.draw_text(
-                                    &format!("{}: {:.1}%", i + 1, order * 100.0),
-                                    SCREEN_WIDTH / 2
-                                        - d.measure_text(
-                                            &format!("{}: {:.1}%", i + 1, order * 100.0),
-                                            20,
-                                        ) / 2,
-                                    SCREEN_HEIGHT / 2 + 50 + i as i32 * 20,
-                                    20,
-                                    // get index and get color of players
-                                    players[index].color,
-                                );
+                        if (*game_type == MiniGames::ColorTheMap) {
+                            let mut orderd = persents.clone();
+                            orderd.sort_by(|a, b| b.partial_cmp(a).unwrap());
+                            for (i, order) in orderd.iter().enumerate() {
+                                let og_index: Option<usize> = persents
+                                    .iter()
+                                    .position(|x| *x != 0. && x == order)
+                                    .or_else(|| None);
+                                if let Some(index) = og_index {
+                                    d.draw_text(
+                                        &format!("{}: {:.1}%", i + 1, order * 100.0),
+                                        SCREEN_WIDTH / 2
+                                            - d.measure_text(
+                                                &format!("{}: {:.1}%", i + 1, order * 100.0),
+                                                20,
+                                            ) / 2,
+                                        SCREEN_HEIGHT / 2 + 50 + i as i32 * 20,
+                                        20,
+                                        // get index and get color of players
+                                        players[index].color,
+                                    );
+                                }
                             }
                         }
                     }
@@ -910,7 +1114,16 @@ fn main() {
                         100.0,
                         50.0,
                     );
+                    // get hight player with hight score
+                    let high_score_player = players.iter().max_by_key(|p| p.points).unwrap();
                     let play_button = d.gui_button(bounds, Some(rstr!("Play Again")));
+                    d.draw_text(
+                        &format!("Player {}", high_score_player.points),
+                        SCREEN_WIDTH / 2,
+                        SCREEN_HEIGHT / 2 - 50,
+                        30,
+                        Color::BLACK,
+                    );
                     if play_button {
                         game_mode = GameMode::Game;
                     }
