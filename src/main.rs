@@ -1,6 +1,6 @@
 use raylib::prelude::*;
 use raylib_sys::TraceLogLevel;
-use std::{cell::OnceCell, ffi::CString};
+use std::{cell::OnceCell, ffi::CString, rc::Rc};
 
 const SCREEN_WIDTH: i32 = 1200;
 const SCREEN_HEIGHT: i32 = 650;
@@ -8,7 +8,7 @@ const PAINT_RADIUS: f32 = 5.0; // Radius of the paint splat
 
 // global counter
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Player {
     pub position: Vector2,
     pub velocity: Vector2,
@@ -21,18 +21,20 @@ pub struct Player {
     pub width: f32,
     pub height: f32,
     pub jump_force: f32,
-    pub texture: Texture2D,
+    pub texture: Rc<Texture2D>,
     pub is_jumping: bool,
     pub jump_time: f32,
     pub max_jump_time: f32,
     pub min_jump_velocity: f32,
     pub points: u32,
+    pub number: u32,
 }
 
 #[derive(Debug, Copy, Clone)]
 pub enum Controls {
     WASD,
     ArrowKeys,
+    // Controller(usize),
 }
 
 #[derive(Debug, PartialEq, Eq, Clone, Copy)]
@@ -70,6 +72,7 @@ impl Player {
         height: f32,
         jump_force: f32,
         texture: Texture2D,
+        number: u32,
     ) -> Self {
         Player {
             position,
@@ -83,12 +86,13 @@ impl Player {
             width,
             height,
             jump_force,
-            texture,
+            texture: Rc::new(texture),
             is_jumping: false,
             jump_time: 0.0,
             max_jump_time: 0.4, // Maximum time the jump can be held (in seconds)
             min_jump_velocity: 200.0, // Minimum jump velocity when tapping
             points: 0,
+            number,
         }
     }
 
@@ -116,13 +120,22 @@ impl Player {
                     primary: consts::KeyboardKey::KEY_J,
                     secondary: consts::KeyboardKey::KEY_K,
                 };
-            }
+            } // Controls::Controller(index) => {
+              // keys = Input {
+              //     up: consts::GamepadButton:: as usize,
+              //     down: consts::GamepadButton::DOWN as usize,
+              //     left: consts::GamepadButton::LEFT as usize,
+              //     right: consts::GamepadButton::RIGHT as usize,
+              //     primary: consts::GamepadButton::A as usize,
+              //     secondary: consts::GamepadButton::B as usize,
+              // };
+              // }
         }
+        // consts::GamepadButton::UP
         // Apply gravity.  This happens *before* jump input.
         if !self.is_on_ground {
             self.velocity.y += 980.8 * dt;
         }
-
         // New jump logic
         if *self.game == MiniGames::ColorTheMap {
             if rl.is_key_down(keys.up) && self.is_on_ground && !self.is_jumping {
@@ -164,7 +177,11 @@ impl Player {
 
         self.position += self.velocity * dt;
     }
-    pub fn handle_collision(&mut self, ops: &Vec<EnvItem>) -> Vec<(Rectangle, Vec<Vector2>)> {
+    pub fn handle_collision(
+        &mut self,
+        ops: &Vec<EnvItem>,
+        players: Vec<&Player>,
+    ) -> Vec<(Rectangle, Vec<Vector2>)> {
         let player_rect = self.get_collision_rect();
         let mut collisions = Vec::new();
 
@@ -225,6 +242,34 @@ impl Player {
                 collisions.push((op.rect.clone(), points));
             }
         }
+        for player in players {
+            let rect = player.get_collision_rect();
+            if let Some(collision) = rect.get_collision_rec(&player_rect) {
+                // Resolve collision
+                let dx = collision.width;
+                let dy = collision.height;
+
+                if dx < dy {
+                    // X-axis collision
+                    if player_rect.x < rect.x {
+                        self.position.x -= dx;
+                    } else {
+                        self.position.x += dx;
+                    }
+                    self.velocity.x = 0.0;
+                } else {
+                    // Y-axis collision
+                    if player_rect.y < rect.y {
+                        self.position.y -= dy;
+                        self.velocity.y = 0.0;
+                        self.is_on_ground = true;
+                    } else {
+                        self.position.y += dy;
+                        self.velocity.y = 0.0;
+                    }
+                }
+            }
+        }
 
         collisions
     }
@@ -250,14 +295,15 @@ impl Player {
         //     self.rotation,
         //     self.color,
         // );
+
         d.draw_texture_ex(
-            &self.texture,
+            &self.texture.as_ref(),
             Vector2::new(
                 self.position.x - self.width / 2.,
                 self.position.y - self.height / 2.,
             ),
             self.rotation,
-            0.32,
+            0.65,
             Color::WHITE,
         );
     }
@@ -273,6 +319,13 @@ impl Player {
 pub struct EnvItem {
     pub rect: Rectangle,
     pub color: Color,
+}
+
+pub struct Bullet {
+    pub rect: Rectangle,
+    pub color: Color,
+    pub speed: Vector2,
+    pub time_to_live: f32,
 }
 
 fn main() {
@@ -295,6 +348,8 @@ fn main() {
         .unwrap();
     let mut player1_texture = rl.load_texture(&thread, "./static/player1.png").unwrap();
     let mut player2_texture = rl.load_texture(&thread, "./static/player2.png").unwrap();
+    let mut player3_texture = rl.load_texture(&thread, "./static/player3.png").unwrap();
+    let mut player4_texture = rl.load_texture(&thread, "./static/player4.png").unwrap();
 
     let mut level_image = Image::load_image("./static/level.png").unwrap();
     level_image.resize(SCREEN_WIDTH, SCREEN_HEIGHT);
@@ -307,9 +362,12 @@ fn main() {
     let mut head_msg: Option<String> = None;
     let mut level_done = false;
     let mut level_end_timer = 5.0;
+    let mut spawn_timer = 5.0;
+    let mut players_count = 2;
 
     let mut game_type = Box::new(MiniGames::ColorTheMap);
     let mut game_mode = GameMode::MainMenu;
+    let mut bullets: Vec<Bullet> = Vec::new();
 
     let mut camera = Camera2D {
         offset: Vector2::new(
@@ -521,30 +579,58 @@ fn main() {
         },
     ];
 
-    let mut players = [
+    let mut players: [Player; 4] = [
         Player::new(
             Vector2::new(100.0, 100.0),
             0.0,
             200.0,
-            Color::RED,
+            Color::from_hex("FBB954").unwrap(),
             Controls::WASD,
             game_type.clone(),
             50.0,
             50.0,
             700.0,
             player1_texture,
+            0,
         ),
         Player::new(
             Vector2::new(200.0, 100.0),
             0.0,
             200.0,
-            Color::GREEN,
+            Color::from_hex("A884F3").unwrap(),
             Controls::ArrowKeys,
             game_type.clone(),
             50.0,
             50.0,
             700.0,
             player2_texture,
+            1,
+        ),
+        Player::new(
+            Vector2::new(300.0, 100.0),
+            0.0,
+            200.0,
+            Color::from_hex("1EBC73").unwrap(),
+            Controls::ArrowKeys,
+            game_type.clone(),
+            50.0,
+            50.0,
+            700.0,
+            player3_texture,
+            2,
+        ),
+        Player::new(
+            Vector2::new(400.0, 100.0),
+            0.0,
+            200.0,
+            Color::from_hex("E83B3B").unwrap(),
+            Controls::ArrowKeys,
+            game_type.clone(),
+            50.0,
+            50.0,
+            700.0,
+            player4_texture,
+            3,
         ),
     ];
 
@@ -557,7 +643,12 @@ fn main() {
 
     while !rl.window_should_close() {
         let dt = rl.get_frame_time();
-
+        println!(
+            "{:?}",
+            rl.get_gamepad_axis_movement(0, consts::GamepadAxis::GAMEPAD_AXIS_LEFT_X)
+        );
+        //  rl.is_gamepad_button_down(0, consts::GamepadButton::GAMEPAD_BUTTON_LEFT_FACE_UP)
+        // println!("{}", );
         // Update transition
         if transitioning {
             if !reversing {
@@ -581,10 +672,30 @@ fn main() {
                 }
             }
         }
-        for player in &mut players {
+        let mut delete_bullets = vec![];
+        for (index, bullet) in bullets.iter_mut().enumerate() {
+            // bullet.update(&rl, dt);
+            bullet.rect.x += bullet.speed.x * dt;
+            bullet.rect.y += bullet.speed.y * dt;
+            bullet.time_to_live -= dt;
+            if bullet.time_to_live <= 0.0 {
+                delete_bullets.push(index);
+            }
+        }
+        for index in delete_bullets {
+            bullets.remove(index);
+        }
+        let players_clone = players.clone();
+        for player in &mut players[0..players_count] {
+            let players_clone: Vec<&Player> = players_clone
+                .iter()
+                .map(|p| p)
+                .filter(|p| p.number != player.number)
+                .collect();
+
             if !level_done {
                 player.update(&rl, dt);
-                let collisions = player.handle_collision(&ops);
+                let collisions = player.handle_collision(&ops, players_clone);
                 let is_colliding = !collisions.is_empty();
 
                 let points: Vec<Vector2> = collisions
@@ -629,6 +740,20 @@ fn main() {
             game_type = Box::new(MiniGames::Dodge);
         }
 
+        if (*game_type == MiniGames::Dodge && spawn_timer <= 0.0) {
+            bullets.push(Bullet {
+                rect: Rectangle::new(200., 200., 15., 30.),
+                color: Color::PINK,
+                speed: Vector2::new(100.0, 0.0),
+                time_to_live: 10.,
+            });
+            spawn_timer = 5.0;
+        }
+
+        if (*game_type == MiniGames::Dodge) {
+            spawn_timer -= dt;
+        }
+
         if (level_timer <= 0.0) {
             // level += 1;
             persents = calculate_winner(
@@ -636,8 +761,8 @@ fn main() {
                 2,
                 &players[0].color,
                 &players[1].color,
-                &Color::ALICEBLUE,
-                &Color::WHEAT,
+                &players[2].color,
+                &players[3].color,
             );
             // get index of largest value
             let mut index = 0;
@@ -646,18 +771,17 @@ fn main() {
                     index = i;
                 }
             }
-            println!("{:?}", index);
 
             match index {
                 0 => players[0].points += 1,
                 1 => players[1].points += 1,
-                // 2 => players[2].points += 1,
-                // 3 => players[3].points += 1,
+                2 => players[2].points += 1,
+                3 => players[3].points += 1,
                 _ => {}
             }
             head_msg = Some(format!("player {} won", index + 1));
 
-            for player in &mut players {
+            for player in &mut players[0..players_count] {
                 if player.points >= 5 {
                     // player.points += 1;
                 }
@@ -714,8 +838,13 @@ fn main() {
                     if (game_type == Box::new(MiniGames::ColorTheMap)) {
                         d.draw_texture(&map_texture, 0, 0, Color::WHITE);
                     }
-                    for player in players.iter() {
+                    for player in players[0..players_count].iter() {
                         player.draw(&mut d);
+                    }
+
+                    // draw bullets
+                    for bullet in bullets.iter() {
+                        d.draw_rectangle_rec(bullet.rect, bullet.color);
                     }
 
                     // for op in ops.iter() {
@@ -757,7 +886,6 @@ fn main() {
                                 .iter()
                                 .position(|x| *x != 0. && x == order)
                                 .or_else(|| None);
-                            println!("{:?}", og_index);
                             if let Some(index) = og_index {
                                 d.draw_text(
                                     &format!("{}: {:.1}%", i + 1, order * 100.0),
@@ -796,7 +924,33 @@ fn main() {
                     );
 
                     let play_button = d.gui_button(bounds, Some(rstr!("Play")));
-
+                    let bounds = Rectangle::new(
+                        ((SCREEN_WIDTH / 2) + 100) as f32,
+                        ((SCREEN_HEIGHT / 2) + 25) as f32,
+                        100.0,
+                        50.0,
+                    );
+                    let increment_button = d.gui_button(bounds, Some(rstr!("+")));
+                    if increment_button {
+                        players_count = (players_count + 1).min(4);
+                    }
+                    d.draw_text(
+                        &format!("Players: {}", players_count),
+                        ((SCREEN_WIDTH / 2) - 50) as i32,
+                        ((SCREEN_HEIGHT / 2) + 50) as i32,
+                        20,
+                        Color::BLACK,
+                    );
+                    let bounds = Rectangle::new(
+                        ((SCREEN_WIDTH / 2) - 200) as f32,
+                        ((SCREEN_HEIGHT / 2) + 25) as f32,
+                        100.0,
+                        50.0,
+                    );
+                    let decrement_button = d.gui_button(bounds, Some(rstr!("-")));
+                    if decrement_button {
+                        players_count = (players_count - 1).max(2);
+                    }
                     // Draw transition textures
                     if transitioning {
                         let screen_center = SCREEN_WIDTH as f32 / 2.0;
