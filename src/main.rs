@@ -449,7 +449,7 @@ fn main() {
     let mut trantition_right_image = Image::load_image("./static/transition_right.png").unwrap();
     trantition_right_image.resize(SCREEN_WIDTH / 2, SCREEN_HEIGHT);
 
-    let mut level_timer = 5.0;
+    let mut level_timer = 60.0;
     let trantition_right_texture = rl
         .load_texture_from_image(&thread, &trantition_right_image)
         .unwrap();
